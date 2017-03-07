@@ -8,13 +8,15 @@ import net.minecraft.block.BlockWall;
 import net.minecraft.block.material.Material;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.init.Items;
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.living.LivingEvent;
 import net.minecraftforge.event.entity.living.LivingFallEvent;
+import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.Mod.EventHandler;
@@ -37,8 +39,8 @@ public class ExampleMod {
     private static final double b = -98d / 25d;
     private static final double c = Math.log(50d / 49d);
     private static WeakHashMap<Entity, Double> entityLastTickDownMotion = new WeakHashMap<>();
-    private double motionYSave;
-    private boolean wasntOnGroundAtStart = false;
+//    private double motionYSave;
+//    private boolean wasntOnGroundAtStart = false;
 
     private static final MethodHandle updateFallState_EntityPlayerMP_Super;
 
@@ -69,102 +71,198 @@ public class ExampleMod {
         MinecraftForge.EVENT_BUS.register(this);
     }
 
-    @SubscribeEvent(priority = EventPriority.HIGHEST)
-    public void onLivingFall(LivingFallEvent event) {
+//    @SubscribeEvent(priority = EventPriority.HIGHEST)
+//    public void onLivingFall(LivingFallEvent event) {
+//        Entity entity = event.getEntity();
+//        if (!internalEventFiring && event.getEntity() instanceof EntityPlayerMP) {
+//            event.setCanceled(true);
+//            return;
+//        }
+//        if (!entity.world.isRemote) {
+//            Double yMotionFromMap = entityLastTickDownMotion.get(entity);
+//            if (yMotionFromMap == null) {
+//                FMLLog.warning("Missing stored y motion! Setting fall distance to zero.");
+//                event.setDistance(0);
+//                return;
+//            }
+//            double storedYMotion = yMotionFromMap;
+//            FMLLog.info("Distance: %f, Multiplier: %f, Speed: %f", event.getDistance(), event.getDamageMultiplier(), storedYMotion);
+//
+//            double distanceFromMotionY = getDistanceFromMotionY(storedYMotion);
+//            FMLLog.info("Distance from stored motionY: %f -> %f", storedYMotion, distanceFromMotionY);
+//            if (distanceFromMotionY < 0) {
+//                // This happened _once_. I've not seen it happen again.
+//                distanceFromMotionY = 0;
+//            }
+//            event.setDistance((float) distanceFromMotionY);
+//            entityLastTickDownMotion.remove(entity);
+//        }
+//    }
+
+    @SubscribeEvent
+    public void onLivingUpdate(LivingEvent.LivingUpdateEvent event) {
         Entity entity = event.getEntity();
-        if (!internalEventFiring && event.getEntity() instanceof EntityPlayerMP) {
-            event.setCanceled(true);
+        // Players are a special case as their falling is processed through networkticks
+        if (!entity.world.isRemote && !(entity instanceof EntityPlayerMP)) {
+            entityLastTickDownMotion.put(entity, entity.motionY);
+        }
+    }
+
+    private static boolean internalEventFiring = false;
+//    private static final WeakHashMap<EntityPlayer, Boolean> LAST_TICK_END_GROUND_STATE = new WeakHashMap<>();
+
+
+    // Used to restore
+    private static final WeakHashMap<EntityPlayerMP, DataStore> PLAYER_DATA_MAP = new WeakHashMap<>();
+
+
+    // TODO: Convert to a a capability
+    private static class DataStore {
+        // Used to determine if the player hit the ground during the player tick by comparing it to the post-tick value
+        boolean onGroundAtStartOfPlayerTick;
+        // Used to restore value when received player packet modifies the onGround field
+        boolean onGroundAtEndOfPlayerTick;
+        // Used as the speed that the player hit the ground
+        double motionYAtStartOfPlayerTick;
+    }
+
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public void onPlayerTick2(TickEvent.PlayerTickEvent event) {
+        if (event.player instanceof EntityPlayerMP) {
+            EntityPlayerMP playerMP = (EntityPlayerMP)event.player;
+            DataStore dataStore = PLAYER_DATA_MAP.get(playerMP);
+            switch (event.phase) {
+                case START:
+                    if (dataStore == null) {
+                        dataStore = new DataStore();
+                        PLAYER_DATA_MAP.put(playerMP, dataStore);
+                    }
+                    dataStore.onGroundAtStartOfPlayerTick = playerMP.onGround;
+                    dataStore.motionYAtStartOfPlayerTick = playerMP.motionY;
+                    break;
+                case END:
+                    if (!dataStore.onGroundAtStartOfPlayerTick && playerMP.onGround) {
+                        // Player hit the ground during their update tick!
+                        entityLastTickDownMotion.put(playerMP, dataStore.motionYAtStartOfPlayerTick);
+                        internalEventFiring = true;
+                        manualUpdateFallState(playerMP);
+                        internalEventFiring = false;
+                    }
+                    dataStore.onGroundAtEndOfPlayerTick = playerMP.onGround;
+                    break;
+            }
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onLivingFall2(LivingFallEvent event) {
+        Entity entity = event.getEntity();
+
+        final double storedYMotion;
+        if (entity.world.isRemote) {
+            storedYMotion = entity.motionY;
             return;
         }
-        if (!entity.world.isRemote) {
+        else if (entity instanceof EntityPlayerMP) {
+            if (!internalEventFiring) {
+//                // Restore state to before network tick processing
+                entity.onGround = PLAYER_DATA_MAP.get(entity).onGroundAtEndOfPlayerTick;
+                FMLLog.info("MotY: " + entity.motionY);
+                entity.motionY = PLAYER_DATA_MAP.get(entity).motionYAtStartOfPlayerTick;
+                FMLLog.info("Restored motY: " + entity.motionY);
+                event.setCanceled(true);
+                return;
+//                storedYMotion = entity.motionY;
+            }
+            else {
+                storedYMotion = PLAYER_DATA_MAP.get(entity).motionYAtStartOfPlayerTick;
+            }
+        }
+        else {
+            // TODO: Can't we just use the current value of motionY for non-player entities? This should also work for client-side entities too right?
+            // Doing the processing
             Double yMotionFromMap = entityLastTickDownMotion.get(entity);
             if (yMotionFromMap == null) {
                 FMLLog.warning("Missing stored y motion! Setting fall distance to zero.");
                 event.setDistance(0);
                 return;
             }
-            double storedYMotion = yMotionFromMap;
-            FMLLog.info("Distance: %f, Multiplier: %f, Speed: %f", event.getDistance(), event.getDamageMultiplier(), storedYMotion);
-
-            double distanceFromMotionY = getDistanceFromMotionY(storedYMotion);
-            FMLLog.info("Distance from stored motionY: %f -> %f", storedYMotion, distanceFromMotionY);
-            if (distanceFromMotionY < 0) {
-                // This happened _once_. I've not seen it happen again.
-                distanceFromMotionY = 0;
-            }
-            event.setDistance((float) distanceFromMotionY);
+            storedYMotion = yMotionFromMap;
             entityLastTickDownMotion.remove(entity);
         }
+        FMLLog.info("Distance: %f, Multiplier: %f, Speed: %f", event.getDistance(), event.getDamageMultiplier(), storedYMotion);
+
+        double distanceFromMotionY = getDistanceFromMotionY(storedYMotion);
+        FMLLog.info("Distance from stored motionY: %f -> %f", storedYMotion, distanceFromMotionY);
+        if (distanceFromMotionY < 0) {
+            // This happened _once_. I've not seen it happen again.
+            distanceFromMotionY = 0;
+        }
+        event.setDistance((float) distanceFromMotionY);
     }
 
     @SubscribeEvent
-    public void onLivingUpdate(LivingEvent.LivingUpdateEvent event) {
-        Entity entity = event.getEntity();
-        // Players are a special case as their falling is processed through networkticks
-        if (!entity.world.isRemote && !(entity instanceof EntityPlayer)) {
-            entityLastTickDownMotion.put(entity, entity.motionY);
+    public void onRightClickStick(PlayerInteractEvent.RightClickItem event) {
+        ItemStack itemStack = event.getItemStack();
+        if (itemStack != null && itemStack.getItem() == Items.STICK) {
+            event.getEntity().motionY+=1;
         }
     }
 
-    private static boolean internalEventFiring = false;
-    private static final WeakHashMap<EntityPlayer, Boolean> LAST_TICK_END_GROUND_STATE = new WeakHashMap<>();
-
-
-
-    @SubscribeEvent(priority = EventPriority.LOWEST)
-    public void onPlayerTick(TickEvent.PlayerTickEvent event) {
-        EntityPlayer player = event.player;
-        if (!(player instanceof EntityPlayerMP)) {
-            return;
-        }
-        switch (event.phase) {
-            case START:
-                Boolean aBoolean = LAST_TICK_END_GROUND_STATE.get(player);
-                if (aBoolean != null) {
-                    if (!aBoolean && player.onGround) {
-                        LAST_TICK_END_GROUND_STATE.remove(player);
-                        entityLastTickDownMotion.put(player, motionYSave);
-                        internalEventFiring = true;
-                        manualUpdateFallState((EntityPlayerMP)player);
-                        internalEventFiring = false;
-                    }
-                }
-
-                if (!player.onGround) {
-                    motionYSave = player.motionY;
-                    // As a fallback I guess in-case something unexpected happens
-//                    entityLastTickDownMotion.put(player, motionYSave);
-                    wasntOnGroundAtStart = true;
-                }
-                break;
-            case END:
-                if (wasntOnGroundAtStart) {
-                    if (player.onGround) {
-                        // We hit the ground!
-                        entityLastTickDownMotion.put(player, motionYSave);
-                        internalEventFiring = true;
-                        manualUpdateFallState((EntityPlayerMP)player);
-                        internalEventFiring = false;
-                        LAST_TICK_END_GROUND_STATE.remove(player);
-                    } else {
-                        LAST_TICK_END_GROUND_STATE.put(player, false);
+//    @SubscribeEvent(priority = EventPriority.LOWEST)
+//    public void onPlayerTick(TickEvent.PlayerTickEvent event) {
+//        EntityPlayer player = event.player;
+//        if (!(player instanceof EntityPlayerMP)) {
+//            return;
+//        }
+//        switch (event.phase) {
+//            case START:
+//                Boolean aBoolean = LAST_TICK_END_GROUND_STATE.get(player);
+//                if (aBoolean != null) {
+//                    if (!aBoolean && player.onGround) {
+//                        LAST_TICK_END_GROUND_STATE.remove(player);
 //                        entityLastTickDownMotion.put(player, motionYSave);
-                        // Sometimes the client tells the server it hit the ground before the server thinks so
-                        // Just got to guess
-//                        entityLastTickDownMotion.put(player, (player.motionY - 0.08) * 0.98);
-                    }
-                    wasntOnGroundAtStart = false;
-                }
-                break;
-        }
-    }
+//                        internalEventFiring = true;
+//                        manualUpdateFallState((EntityPlayerMP)player);
+//                        internalEventFiring = false;
+//                    }
+//                }
+//
+//                if (!player.onGround) {
+//                    motionYSave = player.motionY;
+//                    // As a fallback I guess in-case something unexpected happens
+////                    entityLastTickDownMotion.put(player, motionYSave);
+//                    wasntOnGroundAtStart = true;
+//                }
+//                break;
+//            case END:
+//                if (wasntOnGroundAtStart) {
+//                    if (player.onGround) {
+//                        // We hit the ground!
+//                        entityLastTickDownMotion.put(player, motionYSave);
+//                        internalEventFiring = true;
+//                        manualUpdateFallState((EntityPlayerMP)player);
+//                        internalEventFiring = false;
+//                        LAST_TICK_END_GROUND_STATE.remove(player);
+//                    } else {
+//                        LAST_TICK_END_GROUND_STATE.put(player, false);
+////                        entityLastTickDownMotion.put(player, motionYSave);
+//                        // Sometimes the client tells the server it hit the ground before the server thinks so
+//                        // Just got to guess
+////                        entityLastTickDownMotion.put(player, (player.motionY - 0.08) * 0.98);
+//                    }
+//                    wasntOnGroundAtStart = false;
+//                }
+//                break;
+//        }
+//    }
 
-    public void onServerTickEnd(TickEvent.ServerTickEvent event) {
-        if (event.phase == TickEvent.Phase.END) {
-            //iterate through player entities here
-
-        }
-    }
+//    public void onServerTickEnd(TickEvent.ServerTickEvent event) {
+//        if (event.phase == TickEvent.Phase.END) {
+//            //iterate through player entities here
+//
+//        }
+//    }
 
     private static void manualUpdateFallState(EntityPlayerMP playerMP) {
         int j6 = MathHelper.floor(playerMP.posX);
