@@ -8,6 +8,7 @@ import net.minecraft.block.BlockWall;
 import net.minecraft.block.material.Material;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
@@ -128,6 +129,14 @@ public class ExampleMod {
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onPlayerTick2(TickEvent.PlayerTickEvent event) {
+//        switch (event.phase) {
+//            case START:
+//                FMLLog.info("Start motionY: " + event.player.motionY);
+//                break;
+//            case END:
+//                FMLLog.info("End motionY: " + event.player.motionY);
+//                break;
+//        }
         if (event.player instanceof EntityPlayerMP) {
             EntityPlayerMP playerMP = (EntityPlayerMP)event.player;
             DataStore dataStore = PLAYER_DATA_MAP.get(playerMP);
@@ -144,13 +153,24 @@ public class ExampleMod {
                     if (!dataStore.onGroundAtStartOfPlayerTick && playerMP.onGround) {
                         // Player hit the ground during their update tick!
                         entityLastTickDownMotion.put(playerMP, dataStore.motionYAtStartOfPlayerTick);
-                        internalEventFiring = true;
-                        manualUpdateFallState(playerMP);
-                        internalEventFiring = false;
+                        playerMP.onGround = false;
+                        FMLLog.info("Restoring motionY to " + dataStore.motionYAtStartOfPlayerTick + " from " + playerMP.motionY);
+                        playerMP.motionY = dataStore.motionYAtStartOfPlayerTick;
+//                        internalEventFiring = true;
+//                        manualUpdateFallState(playerMP);
+//                        internalEventFiring = false;
                     }
                     dataStore.onGroundAtEndOfPlayerTick = playerMP.onGround;
                     break;
             }
+
+//            switch (event.phase) {
+//                case END:
+//                    FMLLog.info("End motionY(modified): " + event.player.motionY);
+//                    break;
+//                default:
+//                    break;
+//            }
         }
     }
 
@@ -161,22 +181,22 @@ public class ExampleMod {
         final double storedYMotion;
         if (entity.world.isRemote) {
             storedYMotion = entity.motionY;
-            return;
+//            return;
         }
         else if (entity instanceof EntityPlayerMP) {
-            if (!internalEventFiring) {
-//                // Restore state to before network tick processing
-                entity.onGround = PLAYER_DATA_MAP.get(entity).onGroundAtEndOfPlayerTick;
-                FMLLog.info("MotY: " + entity.motionY);
-                entity.motionY = PLAYER_DATA_MAP.get(entity).motionYAtStartOfPlayerTick;
-                FMLLog.info("Restored motY: " + entity.motionY);
-                event.setCanceled(true);
-                return;
-//                storedYMotion = entity.motionY;
-            }
-            else {
+//            if (!internalEventFiring) {
+////                // Restore state to before network tick processing
+//                entity.onGround = PLAYER_DATA_MAP.get(entity).onGroundAtEndOfPlayerTick;
+//                FMLLog.info("MotY: " + entity.motionY);
+//                entity.motionY = PLAYER_DATA_MAP.get(entity).motionYAtStartOfPlayerTick;
+//                FMLLog.info("Restored motY: " + entity.motionY);
+//                event.setCanceled(true);
+//                return;
+////                storedYMotion = entity.motionY;
+//            }
+//            else {
                 storedYMotion = PLAYER_DATA_MAP.get(entity).motionYAtStartOfPlayerTick;
-            }
+//            }
         }
         else {
             // TODO: Can't we just use the current value of motionY for non-player entities? This should also work for client-side entities too right?
@@ -205,7 +225,16 @@ public class ExampleMod {
     public void onRightClickStick(PlayerInteractEvent.RightClickItem event) {
         ItemStack itemStack = event.getItemStack();
         if (itemStack != null && itemStack.getItem() == Items.STICK) {
-            event.getEntity().motionY+=1;
+            EntityPlayer player = event.getEntityPlayer();
+            if (player.isSneaking()) {
+                FMLLog.info("Cutting player motion from " + player.motionY + " to " + 0);
+                player.motionY = 0;
+            } else {
+                FMLLog.info("Increasing player motion from " + player.motionY + " to " + (player.motionY + 1));
+                player.motionY += 1;
+                // Required to stop the server from thinking the player is trying to jump
+                player.onGround = false;
+            }
         }
     }
 
