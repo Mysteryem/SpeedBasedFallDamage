@@ -1,0 +1,16 @@
+[
+{
+  "modid": "speedbasedfalldamage",
+  "name": "Speed Based Fall Damage",
+  "description": "Makes fall damage dependent on speed rather than air-time",
+  "version": "${version}",
+  "mcversion": "${mcversion}",
+  "url": "",
+  "updateUrl": "",
+  "authorList": ["Mysteryem"],
+  "credits": "McJty for the highly useful modding tutorials",
+  "logoFile": "",
+  "screenshots": [],
+  "dependencies": []
+}
+]
