@@ -4,16 +4,15 @@ import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraftforge.event.entity.living.LivingFallEvent;
-import net.minecraftforge.fml.common.FMLLog;
 
 /**
  * Created by Mysteryem on 11/06/2017.
  */
 public class ProxyCommon {
     // Pre-calculatable constants
-    private static final double a = 25d / 98d;
-    private static final double b = -98d / 25d;
-    private static final double c = Math.log(50d / 49d);
+    private static final double a = 25d / 98d; //As precise as a double can store the result: 0.25510204081632654D;
+    private static final double b = -98d / 25d; //-3.92d;
+    private static final double c = 49.498316452509154484714331401824; //1 / Math.log(50d / 49d), as precise as a double can store the result: 49.49831645250915D
 
     private boolean serverSideLegBreakageAllowed;
 
@@ -68,10 +67,19 @@ public class ProxyCommon {
     static float getDistanceFromMotionY(double motionY) {
         // 25d / 98d * motionY + 1
         double part1 = a * motionY + 1;
+
+        // part1 = 0 -> log(part1) = -infinity, part1 < 0 -> log(part1) = NaN, both aren't usable because minecraft
+        // converts fall distance to an int as part of a ciel operation
+        if (part1 <= 0) {
+            // You have to be travelling at more than 3.92 blocks _per tick_ downwards to hit this (78.4 blocks per second)
+            // part1 = Double.MIN_VALUE; // smallest double greater than 0
+            // the below distance calculation then becomes 144250.23861878135d
+            return 144250.23f;
+        }
+
         // -(196 + (-98d / 25d) * (50 * part1 - Math.log(part1) / Math.log(50d / 49d)))
         // -(196 + (-98d / 25d) * (50 * (25d / 98d * motionY + 1) - Math.log(25d / 98d * motionY + 1) / Math.log(50d / 49d)))
-
-        double distance = -(196 + b * (50 * part1 - Math.log(part1) / c));
+        double distance = -(196 + b * (50 * part1 - Math.log(part1) * c));
         if (distance < 0) {
             // This happened _once_ and I have no idea how
             distance = 0;
@@ -92,8 +100,7 @@ public class ProxyCommon {
             if (!serverSideLegBreakageAllowed) {
                 event.setCanceled(true);
             } else {
-//                event.setDistance((float) getDistanceFromMotionY(legsOwner.motionY));
-                FMLLog.info("distance " + event.getDistance());
+//                FMLLog.info("distance " + event.getDistance());
             }
         } else {
             event.setDistance(getDistanceFromMotionY(legsOwner.motionY));
