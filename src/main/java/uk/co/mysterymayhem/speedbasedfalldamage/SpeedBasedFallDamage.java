@@ -17,14 +17,14 @@ import net.minecraftforge.fml.relauncher.Side;
 @Mod(
         modid = SpeedBasedFallDamage.MODID,
         version = SpeedBasedFallDamage.VERSION,
-        acceptedMinecraftVersions = "[1.10.2, 1.12)",
+        acceptedMinecraftVersions = "[1.10.2, 1.13)",
         name = "Speed Based Fall Damage",
         acceptableRemoteVersions = "[1.0.0,1.1)"
 )
 public class SpeedBasedFallDamage {
 
     static final String MODID = "speedbasedfalldamage";
-    static final String VERSION = "1.0.0";
+    static final String VERSION = "1.0.1";
 
     static final SimpleNetworkWrapper NETWORK_WRAPPER = NetworkRegistry.INSTANCE.newSimpleChannel(MODID);
 
