@@ -1,6 +1,5 @@
 package uk.co.mysterymayhem.speedbasedfalldamage;
 
-import net.minecraft.entity.EntityLivingBase;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.living.LivingFallEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -24,7 +23,7 @@ import net.minecraftforge.fml.relauncher.Side;
 public class SpeedBasedFallDamage {
 
     static final String MODID = "speedbasedfalldamage";
-    static final String VERSION = "1.0.1";
+    static final String VERSION = "1.0.2";
 
     static final SimpleNetworkWrapper NETWORK_WRAPPER = NetworkRegistry.INSTANCE.newSimpleChannel(MODID);
 
@@ -35,8 +34,7 @@ public class SpeedBasedFallDamage {
     // modify the distance further at their own discretion
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onLivingFall(LivingFallEvent event) {
-        EntityLivingBase entityLiving = event.getEntityLiving();
-        proxy.processLegBreakage(event, entityLiving);
+        proxy.processLegBreakage(event, event.getEntityLiving());
     }
 
     @EventHandler
