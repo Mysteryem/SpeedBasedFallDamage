@@ -9,7 +9,7 @@ import net.minecraftforge.event.entity.living.LivingFallEvent;
  * Created by Mysteryem on 11/06/2017.
  */
 public class ProxyCommon {
-    // Pre-calculatable constants
+    // Pre-calculatable constants inserted by the compiler when needed
     private static final double a = 25d / 98d; //As precise as a double can store the result: 0.25510204081632654D;
     private static final double b = -98d / 25d; //-3.92d;
     private static final double c = 49.498316452509154484714331401824; //1 / Math.log(50d / 49d), as precise as a double can store the result: 49.49831645250915D
@@ -65,6 +65,11 @@ public class ProxyCommon {
      * forces taking affect other than gravity.
      */
     static float getDistanceFromMotionY(double motionY) {
+        if (motionY > 0) {
+            // Just in case, since positive motionY will actually cause damage with this formula
+            return 0;
+        }
+
         // 25d / 98d * motionY + 1
         double part1 = a * motionY + 1;
 
@@ -72,14 +77,33 @@ public class ProxyCommon {
         // converts fall distance to an int as part of a ciel operation
         if (part1 <= 0) {
             // You have to be travelling at more than 3.92 blocks _per tick_ downwards to hit this (78.4 blocks per second)
-            // part1 = Double.MIN_VALUE; // smallest double greater than 0
-            // the below distance calculation then becomes 144250.23861878135d
+            // which is Minecraft's terminal velocity.
+            // Exactly zero will cause the formula to produce infinity, anything less than zero results in NaN since the
+            // result becomes a complex number.
+            //
+            // You can see that this is terminal velocity from the formula from velocity u to v for y-axis
+            // motion each tick. Terminal velocity will be when v = u, i.e., you don't go any faster
+            //
+            // The formula for y-axis velocity each tick when affected by only the pull of gravity
+            // v = (u - 0.08) * 0.98
+            // but v = u, so
+            // v = (v - 0.08) * 0.98
+            // v = 0.98v - 0.0784
+            // v - 0.98v = -0.0784
+            // v * (1 - 0.98) = -0.0784
+            // v = -0.0784 / (1 - 0.98)
+            // v = -0.0784 / 0.02
+            // v = -3.92
+            //
+            // When part1 == Double.MIN_VALUE (smallest double greater than 0) the below distance calculation then
+            // becomes 144250.23861878135d so we'll use that as the maximum
             return 144250.23f;
         }
 
+        // Some expansions
         // -(196 + (-98d / 25d) * (50 * part1 - Math.log(part1) / Math.log(50d / 49d)))
         // -(196 + (-98d / 25d) * (50 * (25d / 98d * motionY + 1) - Math.log(25d / 98d * motionY + 1) / Math.log(50d / 49d)))
-        double distance = -(196 + b * (50 * part1 - Math.log(part1) * c));
+        double distance = -196 - b * (50 * part1 - Math.log(part1) * c);
         if (distance < 0) {
             // This happened _once_ and I have no idea how
             distance = 0;
@@ -88,8 +112,6 @@ public class ProxyCommon {
     }
 
     void breakSomeLegs(float calculatedDistanceFromSpeed, float damageMultiplier, EntityPlayer legsOwner) {
-        legsOwner.onGround = false;
-        legsOwner.isAirBorne = true;
         serverSideLegBreakageAllowed = true;
         legsOwner.fall(calculatedDistanceFromSpeed, damageMultiplier);
         serverSideLegBreakageAllowed = false;
